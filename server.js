@@ -12,6 +12,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'client/build')));
 
+// Serve static files from storage directory
+app.use('/storage', express.static(path.join(__dirname, 'storage')));
+
 // Data directory setup
 const DATA_DIR = process.env.DATA_DIR || './data';
 fs.ensureDirSync(DATA_DIR);

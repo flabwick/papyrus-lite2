@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
+import StreamingMarkdownRenderer from './StreamingMarkdownRenderer';
 import config from '../config';
 
 const AIChat = ({ initialPrompt, settings, onClose }) => {
@@ -363,7 +363,10 @@ const AIChat = ({ initialPrompt, settings, onClose }) => {
               )}
             </div>
             <div className="text-sm text-gray-700 leading-relaxed">
-              <ReactMarkdown>{showFullPrompt ? fullPrompt : document.split('\n\n')[0]}</ReactMarkdown>
+              <StreamingMarkdownRenderer 
+                content={showFullPrompt ? fullPrompt : document.split('\n\n')[0]}
+                isStreaming={false}
+              />
             </div>
           </div>
 
@@ -380,13 +383,10 @@ const AIChat = ({ initialPrompt, settings, onClose }) => {
                 return (
                   <div key={index} className="mb-4 p-3 bg-blue-50 border-l-4 border-blue-400 rounded-r">
                     <div className="text-sm text-blue-800">
-                      <ReactMarkdown 
-                        components={{
-                          p: ({children}) => <p style={{marginBottom: '0.5rem', lineHeight: '1.6'}}>{children}</p>
-                        }}
-                      >
-                        {section.trim()}
-                      </ReactMarkdown>
+                      <StreamingMarkdownRenderer 
+                        content={section.trim()}
+                        isStreaming={false}
+                      />
                     </div>
                   </div>
                 );
@@ -421,14 +421,10 @@ const AIChat = ({ initialPrompt, settings, onClose }) => {
                         '--tw-prose-p': 'rgb(17 24 39)'
                       }}
                     >
-                      <ReactMarkdown 
-                        components={{
-                          p: ({children}) => <p style={{marginBottom: '1.25rem', lineHeight: '1.8'}}>{children}</p>,
-                          br: () => <br style={{marginBottom: '0.5rem'}} />
-                        }}
-                      >
-                        {section.trim()}
-                      </ReactMarkdown>
+                      <StreamingMarkdownRenderer 
+                        content={section.trim()}
+                        isStreaming={connectionStatus === 'streaming' && index === sections.length - 1}
+                      />
                     </div>
                   </div>
                 );
