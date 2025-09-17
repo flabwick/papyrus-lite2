@@ -1,0 +1,28 @@
+{
+  "name": "papyrus-lite2",
+  "version": "1.0.0",
+  "description": "CLI-based AI prompt management system",
+  "main": "server.js",
+  "scripts": {
+    "start": "NODE_ENV=production node server.js",
+    "dev": "NODE_ENV=development nodemon server.js",
+    "build": "cd client && npm run build",
+    "build-and-start": "npm run build && npm start",
+    "install-all": "npm install && cd client && npm install",
+    "deploy": "npm run build && NODE_ENV=production node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "@anthropic-ai/sdk": "^0.24.3",
+    "fs-extra": "^11.1.1",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": ["ai", "prompts", "cli", "anthropic", "claude"],
+  "author": "James Chadwick",
+  "license": "MIT"
+}
