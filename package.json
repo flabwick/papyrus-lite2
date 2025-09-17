@@ -12,17 +12,24 @@
     "deploy": "npm run build && NODE_ENV=production node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "@anthropic-ai/sdk": "^0.24.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "@anthropic-ai/sdk": "^0.24.3",
+    "express": "^4.18.2",
     "fs-extra": "^11.1.1",
+    "openai": "^5.20.3",
     "path": "^0.12.7"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
-  "keywords": ["ai", "prompts", "cli", "anthropic", "claude"],
+  "keywords": [
+    "ai",
+    "prompts",
+    "cli",
+    "anthropic",
+    "claude"
+  ],
   "author": "James Chadwick",
   "license": "MIT"
 }

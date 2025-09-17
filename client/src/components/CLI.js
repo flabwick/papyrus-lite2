@@ -30,6 +30,11 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
 
   const handleInputChange = (e) => {
     setInput(e.target.value);
+    
+    // Auto-resize textarea
+    const textarea = e.target;
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
   };
 
   const handleKeyDown = (e) => {
@@ -51,6 +56,11 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
         setInput('');
         setSuggestions([]);
         setSelectedSuggestion(-1);
+        
+        // Reset textarea height
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
+        }
       }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -126,21 +136,21 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
         ))}
 
         {/* Current Input Line */}
-        <div className="flex items-center space-x-2">
-          <span className="text-gray-500 text-xs min-w-[60px]">
+        <div className="flex items-start space-x-2">
+          <span className="text-gray-500 text-xs min-w-[60px] mt-1">
             {new Date().toLocaleTimeString()}
           </span>
-          <div className="flex-1 flex items-center">
-            <span className="text-terminal-prompt">$ </span>
-            <input
+          <div className="flex-1 flex items-start">
+            <span className="text-terminal-prompt mt-1">$ </span>
+            <textarea
               ref={inputRef}
-              type="text"
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              className="terminal-input ml-1"
+              className="terminal-input ml-1 resize-none"
               placeholder="Type a command (e.g., /prompts) or raw text..."
               autoComplete="off"
+              rows="1"
             />
           </div>
         </div>

@@ -9,7 +9,8 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'client/build')));
 
 // Serve static files from storage directory
@@ -32,7 +33,7 @@ const initializeDataFiles = async () => {
       let defaultData = {};
       if (key === 'settings') {
         defaultData = {
-          aiModel: 'claude-3-5-sonnet-20241022',
+          aiModel: 'claude-opus-4',
           systemInstructions: 'You are a helpful AI assistant.',
           rootFolderPath: process.env.ROOT_FOLDER_PATH || './'
         };
@@ -220,8 +221,19 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { message, systemInstructions, conversationHistory } = req.body;
     
-    if (!process.env.ANTHROPIC_API_KEY) {
+    const settings = await readJsonFile('settings.json');
+    const model = settings.aiModel || 'claude-opus-4';
+    
+    // Determine which API to use based on model
+    const isOpenAI = model.startsWith('gpt-');
+    const isAnthropic = model.startsWith('claude-');
+    
+    if (isAnthropic && !process.env.ANTHROPIC_API_KEY) {
       return res.status(500).json({ error: 'Anthropic API key not configured' });
+    }
+    
+    if (isOpenAI && !process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' });
     }
     
     // Set up Server-Sent Events
@@ -232,14 +244,6 @@ app.post('/api/chat', async (req, res) => {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'Cache-Control'
     });
-    
-    const Anthropic = require('@anthropic-ai/sdk');
-    const anthropic = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
-    
-    const settings = await readJsonFile('settings.json');
-    const model = settings.aiModel || 'claude-3-5-sonnet-20241022';
     
     // Build messages array with conversation history + current message
     let messages = [];
@@ -258,18 +262,53 @@ app.post('/api/chat', async (req, res) => {
     }
     
     try {
-      const stream = await anthropic.messages.create({
-        model: model,
-        max_tokens: 4000,
-        system: systemInstructions || settings.systemInstructions || 'You are a helpful AI assistant.',
-        messages: messages,
-        stream: true,
-      });
-      
-      for await (const messageStreamEvent of stream) {
-        if (messageStreamEvent.type === 'content_block_delta') {
-          const chunk = messageStreamEvent.delta.text;
-          res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+      if (isAnthropic) {
+        // Handle Anthropic models
+        const Anthropic = require('@anthropic-ai/sdk');
+        const anthropic = new Anthropic({
+          apiKey: process.env.ANTHROPIC_API_KEY,
+        });
+        
+        const stream = await anthropic.messages.create({
+          model: model,
+          max_tokens: 4000,
+          system: systemInstructions || settings.systemInstructions || 'You are a helpful AI assistant.',
+          messages: messages,
+          stream: true,
+        });
+        
+        for await (const messageStreamEvent of stream) {
+          if (messageStreamEvent.type === 'content_block_delta') {
+            const chunk = messageStreamEvent.delta.text;
+            res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+          }
+        }
+        
+      } else if (isOpenAI) {
+        // Handle OpenAI models
+        const OpenAI = require('openai');
+        const openai = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY,
+        });
+        
+        const stream = await openai.chat.completions.create({
+          model: model,
+          messages: [
+            {
+              role: 'system',
+              content: systemInstructions || settings.systemInstructions || 'You are a helpful AI assistant.'
+            },
+            ...messages
+          ],
+          stream: true,
+          max_tokens: 4000,
+        });
+        
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content;
+          if (content) {
+            res.write(`data: ${JSON.stringify({ chunk: content })}\n\n`);
+          }
         }
       }
       

@@ -8,14 +8,40 @@ const AIModelSettings = ({ settings, onSave, onClose }) => {
 
   const availableModels = [
     {
+      id: 'claude-opus-4',
+      name: 'Claude Opus 4',
+      description: 'Most powerful model, best for coding and complex problem-solving',
+      provider: 'anthropic'
+    },
+    {
+      id: 'claude-sonnet-4',
+      name: 'Claude Sonnet 4',
+      description: 'Balanced performance and efficiency, excellent for coding',
+      provider: 'anthropic'
+    },
+    {
       id: 'claude-3-5-sonnet-20241022',
       name: 'Claude 3.5 Sonnet',
-      description: 'Most capable model, best for complex tasks'
+      description: 'Previous generation, reliable for most tasks',
+      provider: 'anthropic'
     },
     {
       id: 'claude-3-5-haiku-20241022',
       name: 'Claude 3.5 Haiku',
-      description: 'Fastest model, good for simple tasks'
+      description: 'Fastest model, good for simple tasks',
+      provider: 'anthropic'
+    },
+    {
+      id: 'gpt-5',
+      name: 'GPT-5',
+      description: 'OpenAI\'s most capable model with advanced reasoning',
+      provider: 'openai'
+    },
+    {
+      id: 'gpt-5-mini',
+      name: 'GPT-5 Mini',
+      description: 'Faster and more cost-effective version of GPT-5',
+      provider: 'openai'
     }
   ];
 
@@ -67,8 +93,17 @@ const AIModelSettings = ({ settings, onSave, onClose }) => {
                   onChange={() => setAiModel(model.id)}
                   className="text-blue-600"
                 />
-                <div>
-                  <div className="font-semibold">{model.name}</div>
+                <div className="flex-1">
+                  <div className="flex items-center space-x-2">
+                    <div className="font-semibold">{model.name}</div>
+                    <span className={`px-2 py-1 text-xs rounded ${
+                      model.provider === 'anthropic' 
+                        ? 'bg-orange-900 text-orange-200' 
+                        : 'bg-green-900 text-green-200'
+                    }`}>
+                      {model.provider === 'anthropic' ? 'Anthropic' : 'OpenAI'}
+                    </span>
+                  </div>
                   <div className="text-sm text-gray-400">{model.description}</div>
                 </div>
               </div>
@@ -80,14 +115,20 @@ const AIModelSettings = ({ settings, onSave, onClose }) => {
       <div className="mb-6 p-4 bg-gray-800 rounded">
         <h3 className="text-lg font-semibold mb-2">Model Information</h3>
         <div className="space-y-2 text-sm text-gray-300">
-          <p><strong>Claude 3.5 Sonnet:</strong> Best for complex reasoning, analysis, and creative tasks. Higher quality responses but slower.</p>
-          <p><strong>Claude 3.5 Haiku:</strong> Optimized for speed and efficiency. Good for simple questions and quick responses.</p>
+          <p><strong>Claude Opus 4:</strong> Most powerful model with state-of-the-art coding capabilities and complex problem-solving. Best for demanding tasks.</p>
+          <p><strong>Claude Sonnet 4:</strong> Excellent balance of performance and efficiency. Great for coding and everyday complex tasks.</p>
+          <p><strong>Claude 3.5 Sonnet:</strong> Reliable previous generation model for complex reasoning and analysis.</p>
+          <p><strong>Claude 3.5 Haiku:</strong> Fastest Claude model, optimized for speed and simple tasks.</p>
+          <p><strong>GPT-5:</strong> OpenAI's latest flagship model with advanced reasoning capabilities and broad knowledge.</p>
+          <p><strong>GPT-5 Mini:</strong> More efficient version of GPT-5, faster responses with good performance.</p>
         </div>
       </div>
 
       <div className="mb-4 p-3 bg-yellow-900 border border-yellow-700 rounded">
         <p className="text-yellow-200 text-sm">
-          <strong>Note:</strong> Make sure your ANTHROPIC_API_KEY is set in the .env file for AI functionality to work.
+          <strong>Note:</strong> Make sure your API keys are set in the .env file:
+          <br />• ANTHROPIC_API_KEY for Claude models
+          <br />• OPENAI_API_KEY for GPT models
         </p>
       </div>
 

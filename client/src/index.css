@@ -33,6 +33,11 @@ code {
   font-family: inherit;
   font-size: inherit;
   width: 100%;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  min-height: 1.4em;
+  line-height: 1.4;
 }
 
 .terminal-input::placeholder {
