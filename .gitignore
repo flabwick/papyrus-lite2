@@ -1,3 +1,6 @@
+# Storage symlink
+storage/
+
 # Environment variables
 .env
 
