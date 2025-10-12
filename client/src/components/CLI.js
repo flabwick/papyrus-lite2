@@ -143,6 +143,14 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
 
   const handleSuggestionClick = (suggestion) => {
     onCommand(suggestion);
+    
+    // Add to command history (avoid duplicates of the last command)
+    setCommandHistory(prev => {
+      const filtered = prev.filter(cmd => cmd !== suggestion);
+      return [suggestion, ...filtered].slice(0, 50); // Keep last 50 commands
+    });
+    
+    setHistoryPosition(-1);
     setInput('');
     setSuggestions([]);
     setSelectedSuggestion(-1);
