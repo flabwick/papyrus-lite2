@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import config from '../config';
+import LinkExtractor from './LinkExtractor';
 
-const PromptPreview = ({ promptName, promptContent, substitutes, settings, onClose, onOpenChat }) => {
+const PromptPreview = ({ promptName, promptContent, substitutes, settings, prompts, onClose, onOpenChat, onSavePrompt, onOpenPromptsManager, onOpenSubstitutesManager }) => {
   const [renderedContent, setRenderedContent] = useState('');
   const [isRendered, setIsRendered] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [exportPath, setExportPath] = useState('');
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editContent, setEditContent] = useState(promptContent);
 
   const renderContent = async () => {
     setIsLoading(true);
@@ -135,6 +138,32 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, onClo
     }
   };
 
+  const handleSaveEdit = async () => {
+    if (promptName === 'Raw Input') {
+      setError('Cannot edit raw input. Use the prompts manager to create a new prompt.');
+      return;
+    }
+
+    if (!editContent.trim()) {
+      setError('Prompt content cannot be empty');
+      return;
+    }
+
+    try {
+      const success = await onSavePrompt(promptName, editContent);
+      if (success) {
+        setShowEditDialog(false);
+        setError('');
+        // Update the local content to reflect the changes
+        // Note: The parent component should handle updating the actual prompt content
+      } else {
+        setError('Failed to save prompt changes');
+      }
+    } catch (error) {
+      setError(`Save failed: ${error.message}`);
+    }
+  };
+
   return (
     <div className="p-6">
       <h2 className="text-xl font-bold mb-4">
@@ -181,6 +210,18 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, onClo
         >
           Export
         </button>
+        
+        {promptName !== 'Raw Input' && (
+          <button
+            onClick={() => {
+              setEditContent(promptContent);
+              setShowEditDialog(true);
+            }}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded transition-colors"
+          >
+            Edit
+          </button>
+        )}
       </div>
 
       {/* Export Dialog */}
@@ -214,6 +255,53 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, onClo
         </div>
       )}
 
+      {/* Edit Dialog */}
+      {showEditDialog && (
+        <div className="mb-4 p-4 bg-gray-800 border border-gray-600 rounded">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-lg font-semibold">Edit Prompt: /{promptName}</h3>
+            {onOpenPromptsManager && (
+              <button
+                onClick={() => {
+                  setShowEditDialog(false);
+                  onOpenPromptsManager();
+                }}
+                className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+              >
+                Full Prompts Manager
+              </button>
+            )}
+          </div>
+          <textarea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            placeholder="Enter prompt content... Use {{link-name}} for substitutions"
+            className="w-full h-40 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm resize-none mb-3"
+          />
+          <div className="text-sm text-gray-400 mb-3">
+            Use {`{{link-name}}`} for substitutions. Links can be file paths or substitute names.
+          </div>
+          <div className="flex space-x-2">
+            <button
+              onClick={handleSaveEdit}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded transition-colors"
+            >
+              Save Changes
+            </button>
+            <button
+              onClick={() => {
+                setShowEditDialog(false);
+                setEditContent(promptContent);
+                setError('');
+              }}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Content Display */}
       <div className="bg-gray-800 border border-gray-600 rounded p-4 max-h-96 overflow-y-auto">
         {isRendered ? (
@@ -227,10 +315,15 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, onClo
         )}
       </div>
 
-      {/* Status */}
-      <div className="mt-4 text-sm text-gray-400">
-        Status: {isRendered ? 'Rendered (substitutions processed)' : 'Raw (substitutions visible)'}
-      </div>
+      {/* Link Analysis */}
+      <LinkExtractor
+        promptContent={promptContent}
+        substitutes={substitutes}
+        settings={settings}
+        prompts={prompts}
+        onOpenPromptsManager={onOpenPromptsManager}
+        onOpenSubstitutesManager={onOpenSubstitutesManager}
+      />
     </div>
   );
 };

@@ -29,6 +29,25 @@ function App() {
     loadData();
   }, []);
 
+  // Add keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Ctrl+P for Prompts Manager
+      if (event.ctrlKey && event.key === 'p') {
+        event.preventDefault();
+        openPromptsManager();
+      }
+      // Ctrl+S for Substitutes Manager
+      if (event.ctrlKey && event.key === 's') {
+        event.preventDefault();
+        openSubstitutesManager();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [prompts, substitutes]);
+
   const loadData = async () => {
     try {
       const [promptsRes, substitutesRes, settingsRes] = await Promise.all([
@@ -71,6 +90,35 @@ function App() {
       console.error('Error saving prompts:', error);
     }
     return false;
+  };
+
+  const saveIndividualPrompt = async (promptName, content) => {
+    const updatedPrompts = {
+      ...prompts,
+      [promptName]: content
+    };
+    return await savePrompts(updatedPrompts);
+  };
+
+  const openPromptsManager = () => {
+    setModalContent(
+      <PromptsManager 
+        prompts={prompts}
+        onSave={savePrompts}
+        onClose={() => setModalContent(null)}
+        reservedCommands={['restart', 'prompts', 'subs', 'system', 'ai-model', 'root']}
+      />
+    );
+  };
+
+  const openSubstitutesManager = () => {
+    setModalContent(
+      <SubstitutesManager
+        substitutes={substitutes}
+        onSave={saveSubstitutes}
+        onClose={() => setModalContent(null)}
+      />
+    );
   };
 
   const saveSubstitutes = async (newSubstitutes) => {
@@ -121,14 +169,7 @@ function App() {
     }
 
     if (command === '/prompts') {
-      setModalContent(
-        <PromptsManager 
-          prompts={prompts}
-          onSave={savePrompts}
-          onClose={() => setModalContent(null)}
-          reservedCommands={['restart', 'prompts', 'subs', 'system', 'ai-model', 'root']}
-        />
-      );
+      openPromptsManager();
       return;
     }
 
@@ -186,7 +227,11 @@ function App() {
           promptContent={prompts[promptName]}
           substitutes={substitutes}
           settings={settings}
+          prompts={prompts}
           onClose={() => setModalContent(null)}
+          onSavePrompt={saveIndividualPrompt}
+          onOpenPromptsManager={openPromptsManager}
+          onOpenSubstitutesManager={openSubstitutesManager}
           onOpenChat={(renderedContent) => {
             setModalContent(
               <AIChat
@@ -209,7 +254,11 @@ function App() {
           promptContent={command}
           substitutes={substitutes}
           settings={settings}
+          prompts={prompts}
           onClose={() => setModalContent(null)}
+          onSavePrompt={saveIndividualPrompt}
+          onOpenPromptsManager={openPromptsManager}
+          onOpenSubstitutesManager={openSubstitutesManager}
           onOpenChat={(renderedContent) => {
             setModalContent(
               <AIChat

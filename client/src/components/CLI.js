@@ -4,6 +4,8 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
   const [input, setInput] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
+  const [commandHistory, setCommandHistory] = useState([]);
+  const [historyPosition, setHistoryPosition] = useState(-1);
   const inputRef = useRef(null);
   const terminalRef = useRef(null);
 
@@ -13,6 +15,25 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
       inputRef.current.focus();
     }
   }, []);
+
+  // Load command history from localStorage on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('papyrus-command-history');
+    if (savedHistory) {
+      try {
+        setCommandHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.warn('Failed to load command history:', e);
+      }
+    }
+  }, []);
+
+  // Save command history to localStorage when it changes
+  useEffect(() => {
+    if (commandHistory.length > 0) {
+      localStorage.setItem('papyrus-command-history', JSON.stringify(commandHistory));
+    }
+  }, [commandHistory]);
 
   useEffect(() => {
     // Scroll to bottom when history updates
@@ -30,6 +51,7 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
 
   const handleInputChange = (e) => {
     setInput(e.target.value);
+    setHistoryPosition(-1); // Reset history position when user types
     
     // Auto-resize textarea
     const textarea = e.target;
@@ -53,6 +75,14 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
 
       if (commandToExecute) {
         onCommand(commandToExecute);
+        
+        // Add to command history (avoid duplicates of the last command)
+        setCommandHistory(prev => {
+          const filtered = prev.filter(cmd => cmd !== commandToExecute);
+          return [commandToExecute, ...filtered].slice(0, 50); // Keep last 50 commands
+        });
+        
+        setHistoryPosition(-1);
         setInput('');
         setSuggestions([]);
         setSelectedSuggestion(-1);
@@ -64,21 +94,50 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
       }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (suggestions.length > 0) {
-        setSelectedSuggestion(prev => 
-          prev <= 0 ? suggestions.length - 1 : prev - 1
-        );
+      
+      // Navigate through command history only
+      if (commandHistory.length > 0) {
+        const newPosition = historyPosition < commandHistory.length - 1 
+          ? historyPosition + 1 
+          : historyPosition;
+        
+        if (newPosition !== historyPosition) {
+          setHistoryPosition(newPosition);
+          setInput(commandHistory[newPosition]);
+          
+          // Auto-resize textarea
+          setTimeout(() => {
+            if (inputRef.current) {
+              inputRef.current.style.height = 'auto';
+              inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
+            }
+          }, 0);
+        }
       }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (suggestions.length > 0) {
-        setSelectedSuggestion(prev => 
-          prev >= suggestions.length - 1 ? 0 : prev + 1
-        );
+      
+      // Navigate through command history only
+      if (commandHistory.length > 0) {
+        const newPosition = historyPosition > 0 
+          ? historyPosition - 1 
+          : -1;
+        
+        setHistoryPosition(newPosition);
+        setInput(newPosition >= 0 ? commandHistory[newPosition] : '');
+        
+        // Auto-resize textarea
+        setTimeout(() => {
+          if (inputRef.current) {
+            inputRef.current.style.height = 'auto';
+            inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
+          }
+        }, 0);
       }
     } else if (e.key === 'Escape') {
       setSuggestions([]);
       setSelectedSuggestion(-1);
+      setHistoryPosition(-1);
     }
   };
 
@@ -159,14 +218,12 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
         {suggestions.length > 0 && (
           <div className="ml-[68px] bg-gray-800 border border-gray-600 rounded max-w-md">
             <div className="p-2 text-xs text-gray-400 border-b border-gray-600">
-              Suggestions (↑↓ to navigate, Enter to select):
+              Suggestions (click to select):
             </div>
             {suggestions.slice(0, 8).map((suggestion, index) => (
               <div
                 key={suggestion}
-                className={`px-3 py-1 cursor-pointer suggestion-item ${
-                  index === selectedSuggestion ? 'selected bg-gray-700' : ''
-                }`}
+                className="px-3 py-1 cursor-pointer suggestion-item hover:bg-gray-700"
                 onClick={() => handleSuggestionClick(suggestion)}
               >
                 {suggestion}
@@ -184,7 +241,8 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
       {/* Help Footer */}
       <div className="bg-gray-800 text-gray-400 px-4 py-2 border-t border-gray-600 text-xs">
         Commands: /restart /prompts /subs /system /ai-model /root | 
-        Type prompt names with / or raw text without /
+        Type prompt names with / or raw text without / | 
+        ↑↓ arrows for command history
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs-extra');
+const glob = require('glob');
 require('dotenv').config();
 
 const app = express();
@@ -147,74 +148,622 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
-// Read file endpoint for substitutions
+// Validate link endpoint for link analysis
+app.post('/api/validate-link', async (req, res) => {
+  try {
+    const { linkData, rootPath } = req.body;
+    const settings = await readJsonFile('settings.json');
+    const actualRootPath = rootPath || settings.rootFolderPath || './';
+    
+    const result = await validateLinkData(linkData, actualRootPath);
+    res.json(result);
+  } catch (error) {
+    console.error('Error validating link:', error);
+    res.json({
+      error: error.message,
+      isValid: false,
+      wordCount: 0,
+      tokenCount: 0
+    });
+  }
+});
+
+// Read file endpoint for substitutions with advanced linking
 app.post('/api/read-file', async (req, res) => {
   try {
     const { filePath } = req.body;
     const settings = await readJsonFile('settings.json');
     const rootPath = settings.rootFolderPath || './';
     
-    // Handle wildcard patterns
-    if (filePath.includes('*')) {
-      return res.json({ 
-        content: `[WILDCARD NOT SUPPORTED: ${filePath}]`,
-        error: `Wildcard patterns not supported: ${filePath}`
-      });
+    // Parse the link content to separate path and heading selector
+    const parsed = parseLinkContent(filePath);
+    
+    let content;
+    if (parsed.hasWildcard) {
+      content = await resolveWildcardLink(parsed, rootPath);
+    } else {
+      content = await resolveSingleFileLink(parsed, rootPath);
     }
     
-    const fullPath = path.resolve(rootPath, filePath);
-    
-    // Security check - ensure file is within root directory
-    if (!fullPath.startsWith(path.resolve(rootPath))) {
-      return res.json({ 
-        content: `[ACCESS DENIED: ${filePath}]`,
-        error: `Access denied: File outside root directory`
-      });
-    }
-    
-    // Check if file exists and is readable
-    if (!await fs.pathExists(fullPath)) {
-      console.error(`File not found: ${fullPath}`);
-      return res.json({ 
-        content: `[FILE NOT FOUND: ${filePath}]`,
-        error: `File not found: ${filePath}`
-      });
-    }
-    
-    const stats = await fs.stat(fullPath);
-    if (!stats.isFile()) {
-      // If it's a directory, return a helpful message
-      if (stats.isDirectory()) {
-        return res.json({ 
-          content: `[DIRECTORY: ${filePath}]`,
-          error: `Path is a directory, not a file: ${filePath}`
-        });
-      }
-      return res.json({ 
-        content: `[NOT A FILE: ${filePath}]`,
-        error: `Path is not a file: ${filePath}`
-      });
-    }
-    
-    // Check file extension
-    const ext = path.extname(fullPath).toLowerCase();
-    if (!['.md', '.txt'].includes(ext)) {
-      return res.json({ 
-        content: `[UNSUPPORTED FILE TYPE: ${ext}]`,
-        error: `Unsupported file type: ${ext}`
-      });
-    }
-    
-    const content = await fs.readFile(fullPath, 'utf8');
     res.json({ content, filePath });
   } catch (error) {
     console.error('Error reading file:', error);
     res.json({ 
-      content: `[ERROR READING FILE: ${req.body.filePath}]`,
+      content: `[ERROR READING FILE: ${req.body.filePath}] - ${error.message}`,
       error: error.message
     });
   }
 });
+
+// Helper functions for advanced file linking
+function parseLinkContent(linkContent) {
+  // Handle quotes and escaping first
+  const unescaped = unescapeSpecialChars(linkContent);
+  
+  // Split on # to separate path from heading selector
+  const hashIndex = unescaped.indexOf('#');
+  let filePath, headingSelector;
+  
+  if (hashIndex === -1) {
+    filePath = unescaped;
+    headingSelector = null;
+  } else {
+    filePath = unescaped.substring(0, hashIndex);
+    headingSelector = unescaped.substring(hashIndex + 1);
+  }
+  
+  // Determine if this is a wildcard pattern
+  const hasWildcard = filePath.includes('*');
+  const isRecursive = filePath.includes('**');
+  
+  return {
+    original: linkContent,
+    filePath: filePath.trim(),
+    headingSelector: headingSelector ? headingSelector.trim() : null,
+    hasWildcard,
+    isRecursive
+  };
+}
+
+function unescapeSpecialChars(content) {
+  // Handle quoted strings
+  if (content.startsWith('"') && content.endsWith('"')) {
+    return content.slice(1, -1);
+  }
+  
+  // Handle escaped characters
+  return content.replace(/\\(.)/g, '$1');
+}
+
+async function resolveWildcardLink(parsed, rootPath) {
+  // Convert wildcard pattern to glob pattern
+  let globPattern;
+  if (path.isAbsolute(parsed.filePath)) {
+    globPattern = parsed.filePath;
+  } else {
+    globPattern = path.join(rootPath, parsed.filePath);
+  }
+
+  // Find matching files
+  const matchingFiles = await findMatchingFiles(globPattern);
+  
+  if (matchingFiles.length === 0) {
+    return `[No files found matching pattern: ${parsed.filePath}]`;
+  }
+
+  // Process each file
+  const results = [];
+  for (const filePath of matchingFiles) {
+    try {
+      const fileContent = await readAndProcessFile(filePath, parsed.headingSelector);
+      const fileName = path.basename(filePath);
+      results.push(`\n--- ${fileName} ---\n${fileContent}`);
+    } catch (error) {
+      const fileName = path.basename(filePath);
+      results.push(`\n--- ${fileName} ---\n[Error: ${error.message}]`);
+    }
+  }
+
+  return results.join('\n');
+}
+
+async function resolveSingleFileLink(parsed, rootPath) {
+  let filePath;
+  if (path.isAbsolute(parsed.filePath)) {
+    filePath = parsed.filePath;
+  } else {
+    filePath = path.resolve(rootPath, parsed.filePath);
+  }
+
+  // Security check
+  const normalizedRoot = path.resolve(rootPath);
+  const normalizedFile = path.resolve(filePath);
+  if (!normalizedFile.startsWith(normalizedRoot)) {
+    throw new Error(`File path outside root directory: ${parsed.filePath}`);
+  }
+
+  // Check if file exists
+  if (!await fs.pathExists(filePath)) {
+    throw new Error(`File not found: ${parsed.filePath}`);
+  }
+
+  // Process the file
+  return await readAndProcessFile(filePath, parsed.headingSelector);
+}
+
+function findMatchingFiles(globPattern) {
+  return new Promise((resolve, reject) => {
+    glob(globPattern, { nodir: true }, (err, files) => {
+      if (err) {
+        reject(err);
+      } else {
+        // Filter for supported file types
+        const supportedFiles = files.filter(file => {
+          const ext = path.extname(file).toLowerCase();
+          return ['.md', '.txt'].includes(ext);
+        }).sort();
+        resolve(supportedFiles);
+      }
+    });
+  });
+}
+
+async function readAndProcessFile(filePath, headingSelector) {
+  // Check file extension
+  const ext = path.extname(filePath).toLowerCase();
+  if (!['.md', '.txt'].includes(ext)) {
+    throw new Error(`Unsupported file type: ${ext}`);
+  }
+
+  // Read file content
+  const fileContent = await fs.readFile(filePath, 'utf8');
+  
+  // If no heading selector, return entire file
+  if (!headingSelector) {
+    return fileContent;
+  }
+
+  // Process heading selector
+  return extractHeadingContent(fileContent, headingSelector);
+}
+
+function extractHeadingContent(fileContent, headingSelector) {
+  // Parse different types of heading selectors
+  const selector = parseHeadingSelector(headingSelector);
+  
+  // Extract headings from content
+  const headings = parseHeadings(fileContent);
+  
+  if (headings.length === 0) {
+    return '[No headings found in file]';
+  }
+  
+  // Apply selector logic
+  return applyHeadingSelector(fileContent, headings, selector);
+}
+
+function parseHeadingSelector(selector) {
+  // Handle case-insensitive prefix
+  let caseInsensitive = false;
+  let actualSelector = selector;
+  if (selector.startsWith('i:')) {
+    caseInsensitive = true;
+    actualSelector = selector.substring(2);
+  }
+
+  // Handle regex patterns
+  if (actualSelector.startsWith('/') && actualSelector.endsWith('/')) {
+    return {
+      type: 'regex',
+      pattern: actualSelector.slice(1, -1),
+      caseInsensitive
+    };
+  }
+
+  // Handle level selectors (=2, =2-4, =2:Heading)
+  if (actualSelector.startsWith('=')) {
+    return parseLevelSelector(actualSelector, caseInsensitive);
+  }
+
+  // Handle ranges (Start..End)
+  if (actualSelector.includes('..')) {
+    const [start, end] = actualSelector.split('..');
+    return {
+      type: 'range',
+      start: start.trim(),
+      end: end.trim(),
+      caseInsensitive
+    };
+  }
+
+  // Handle multiple headings (One,Two,Three)
+  if (actualSelector.includes(',')) {
+    return {
+      type: 'multiple',
+      headings: actualSelector.split(',').map(h => h.trim()),
+      caseInsensitive
+    };
+  }
+
+  // Handle heading-only (Heading!)
+  if (actualSelector.endsWith('!')) {
+    return {
+      type: 'heading-only',
+      heading: actualSelector.slice(0, -1).trim(),
+      caseInsensitive
+    };
+  }
+
+  // Default: single heading with nested content
+  return {
+    type: 'single',
+    heading: actualSelector,
+    caseInsensitive
+  };
+}
+
+function parseLevelSelector(selector, caseInsensitive) {
+  const levelPart = selector.substring(1); // Remove =
+  
+  // Handle level with heading constraint (=2:Heading)
+  if (levelPart.includes(':')) {
+    const [levelSpec, heading] = levelPart.split(':', 2);
+    const levels = parseLevelSpec(levelSpec);
+    return {
+      type: 'level-constrained',
+      levels,
+      heading: heading.trim(),
+      caseInsensitive
+    };
+  }
+  
+  // Handle level range or single level
+  const levels = parseLevelSpec(levelPart);
+  return {
+    type: 'level',
+    levels,
+    caseInsensitive
+  };
+}
+
+function parseLevelSpec(levelSpec) {
+  if (levelSpec.includes('-')) {
+    const [start, end] = levelSpec.split('-').map(n => parseInt(n.trim()));
+    return { min: start, max: end };
+  } else {
+    const level = parseInt(levelSpec.trim());
+    return { min: level, max: level };
+  }
+}
+
+function parseHeadings(content) {
+  const lines = content.split('\n');
+  const headings = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const match = line.match(/^(#{1,6})\s+(.+)$/);
+    if (match) {
+      headings.push({
+        level: match[1].length,
+        text: match[2].trim(),
+        lineIndex: i,
+        fullLine: line
+      });
+    }
+  }
+  
+  return headings;
+}
+
+function applyHeadingSelector(fileContent, headings, selector) {
+  const lines = fileContent.split('\n');
+  
+  switch (selector.type) {
+    case 'single':
+      return extractSingleHeading(lines, headings, selector);
+    case 'heading-only':
+      return extractHeadingOnly(lines, headings, selector);
+    case 'level':
+      return extractByLevel(lines, headings, selector);
+    case 'level-constrained':
+      return extractByLevelConstrained(lines, headings, selector);
+    case 'range':
+      return extractByRange(lines, headings, selector);
+    case 'multiple':
+      return extractMultipleHeadings(lines, headings, selector);
+    case 'regex':
+      return extractByRegex(lines, headings, selector);
+    default:
+      return '[Unknown selector type]';
+  }
+}
+
+function extractSingleHeading(lines, headings, selector) {
+  const heading = findHeading(headings, selector.heading, selector.caseInsensitive);
+  if (!heading) {
+    return `[Heading not found: ${selector.heading}]`;
+  }
+  
+  return extractHeadingWithNested(lines, headings, heading);
+}
+
+function extractHeadingOnly(lines, headings, selector) {
+  const heading = findHeading(headings, selector.heading, selector.caseInsensitive);
+  if (!heading) {
+    return `[Heading not found: ${selector.heading}]`;
+  }
+  
+  // Find content until next heading of same or higher level
+  const startLine = heading.lineIndex + 1;
+  let endLine = lines.length;
+  
+  for (let i = 0; i < headings.length; i++) {
+    const nextHeading = headings[i];
+    if (nextHeading.lineIndex > heading.lineIndex && nextHeading.level <= heading.level) {
+      endLine = nextHeading.lineIndex;
+      break;
+    }
+  }
+  
+  return lines.slice(startLine, endLine).join('\n').trim();
+}
+
+function extractByLevel(lines, headings, selector) {
+  const matchingHeadings = headings.filter(h => 
+    h.level >= selector.levels.min && h.level <= selector.levels.max
+  );
+  
+  if (matchingHeadings.length === 0) {
+    return `[No headings found at level ${selector.levels.min}-${selector.levels.max}]`;
+  }
+  
+  const results = [];
+  for (const heading of matchingHeadings) {
+    const content = extractHeadingWithNested(lines, headings, heading);
+    results.push(content);
+  }
+  
+  return results.join('\n\n');
+}
+
+function extractByLevelConstrained(lines, headings, selector) {
+  const matchingHeadings = headings.filter(h => {
+    const levelMatch = h.level >= selector.levels.min && h.level <= selector.levels.max;
+    const textMatch = selector.caseInsensitive ? 
+      h.text.toLowerCase().includes(selector.heading.toLowerCase()) :
+      h.text.includes(selector.heading);
+    return levelMatch && textMatch;
+  });
+  
+  if (matchingHeadings.length === 0) {
+    return `[No level ${selector.levels.min}-${selector.levels.max} headings found containing: ${selector.heading}]`;
+  }
+  
+  const results = [];
+  for (const heading of matchingHeadings) {
+    const content = extractHeadingWithNested(lines, headings, heading);
+    results.push(content);
+  }
+  
+  return results.join('\n\n');
+}
+
+function extractByRange(lines, headings, selector) {
+  const startHeading = findHeading(headings, selector.start, selector.caseInsensitive);
+  const endHeading = findHeading(headings, selector.end, selector.caseInsensitive);
+  
+  if (!startHeading) {
+    return `[Start heading not found: ${selector.start}]`;
+  }
+  if (!endHeading) {
+    return `[End heading not found: ${selector.end}]`;
+  }
+  
+  if (startHeading.lineIndex >= endHeading.lineIndex) {
+    return `[Invalid range: start heading comes after end heading]`;
+  }
+  
+  // Extract from start heading to end of end heading's content
+  const endContent = extractHeadingWithNested(lines, headings, endHeading);
+  const endContentLines = endContent.split('\n');
+  const endLineIndex = endHeading.lineIndex + endContentLines.length;
+  
+  return lines.slice(startHeading.lineIndex, endLineIndex).join('\n').trim();
+}
+
+function extractMultipleHeadings(lines, headings, selector) {
+  const results = [];
+  
+  for (const headingName of selector.headings) {
+    const heading = findHeading(headings, headingName, selector.caseInsensitive);
+    if (heading) {
+      const content = extractHeadingWithNested(lines, headings, heading);
+      results.push(content);
+    } else {
+      results.push(`[Heading not found: ${headingName}]`);
+    }
+  }
+  
+  return results.join('\n\n');
+}
+
+function extractByRegex(lines, headings, selector) {
+  const flags = selector.caseInsensitive ? 'i' : '';
+  const regex = new RegExp(selector.pattern, flags);
+  
+  const matchingHeadings = headings.filter(h => regex.test(h.text));
+  
+  if (matchingHeadings.length === 0) {
+    return `[No headings found matching pattern: ${selector.pattern}]`;
+  }
+  
+  const results = [];
+  for (const heading of matchingHeadings) {
+    const content = extractHeadingWithNested(lines, headings, heading);
+    results.push(content);
+  }
+  
+  return results.join('\n\n');
+}
+
+function findHeading(headings, searchText, caseInsensitive = false) {
+  return headings.find(h => {
+    if (caseInsensitive) {
+      return h.text.toLowerCase() === searchText.toLowerCase();
+    } else {
+      return h.text === searchText;
+    }
+  });
+}
+
+function extractHeadingWithNested(lines, headings, targetHeading) {
+  const startLine = targetHeading.lineIndex;
+  let endLine = lines.length;
+  
+  // Find the next heading at the same or higher level
+  for (let i = 0; i < headings.length; i++) {
+    const heading = headings[i];
+    if (heading.lineIndex > targetHeading.lineIndex && heading.level <= targetHeading.level) {
+      endLine = heading.lineIndex;
+      break;
+    }
+  }
+  
+  return lines.slice(startLine, endLine).join('\n').trim();
+}
+
+// Link validation function
+async function validateLinkData(linkData, rootPath) {
+  try {
+    let content = '';
+    let matchedFiles = [];
+    let wordCount = 0;
+    let tokenCount = 0;
+
+    if (linkData.isWildcard) {
+      // Handle wildcard patterns
+      let globPattern;
+      if (path.isAbsolute(linkData.path)) {
+        globPattern = linkData.path;
+      } else {
+        globPattern = path.join(rootPath, linkData.path);
+      }
+
+      matchedFiles = await findMatchingFiles(globPattern);
+      
+      if (matchedFiles.length === 0) {
+        return {
+          error: `No files found matching pattern: ${linkData.path}`,
+          isValid: false,
+          wordCount: 0,
+          tokenCount: 0,
+          matchedFiles: []
+        };
+      }
+
+      // Process each matched file
+      const results = [];
+      for (const filePath of matchedFiles) {
+        try {
+          const fileContent = await readAndProcessFile(filePath, linkData.headingSelector);
+          results.push(fileContent);
+        } catch (error) {
+          results.push(`[Error reading ${path.basename(filePath)}: ${error.message}]`);
+        }
+      }
+      
+      content = results.join('\n\n');
+    } else {
+      // Handle single file
+      let filePath;
+      if (path.isAbsolute(linkData.path)) {
+        filePath = linkData.path;
+      } else {
+        filePath = path.resolve(rootPath, linkData.path);
+      }
+
+      // Security check
+      const normalizedRoot = path.resolve(rootPath);
+      const normalizedFile = path.resolve(filePath);
+      if (!normalizedFile.startsWith(normalizedRoot)) {
+        return {
+          error: `File path outside root directory: ${linkData.path}`,
+          isValid: false,
+          wordCount: 0,
+          tokenCount: 0
+        };
+      }
+
+      // Check if file exists
+      if (!await fs.pathExists(filePath)) {
+        return {
+          error: `File not found: ${linkData.path}`,
+          isValid: false,
+          wordCount: 0,
+          tokenCount: 0
+        };
+      }
+
+      // Check file extension
+      const ext = path.extname(filePath).toLowerCase();
+      if (!['.md', '.txt'].includes(ext)) {
+        return {
+          error: `Unsupported file type: ${ext}. Only .md and .txt files are supported.`,
+          isValid: false,
+          wordCount: 0,
+          tokenCount: 0
+        };
+      }
+
+      try {
+        content = await readAndProcessFile(filePath, linkData.headingSelector);
+        matchedFiles = [filePath];
+      } catch (error) {
+        return {
+          error: error.message,
+          isValid: false,
+          wordCount: 0,
+          tokenCount: 0
+        };
+      }
+    }
+
+    // Count words and estimate tokens
+    if (content && !content.startsWith('[')) { // Don't count error messages
+      wordCount = countWords(content);
+      tokenCount = estimateTokens(content);
+    }
+
+    return {
+      isValid: true,
+      error: null,
+      wordCount,
+      tokenCount,
+      matchedFiles,
+      content
+    };
+
+  } catch (error) {
+    return {
+      error: error.message,
+      isValid: false,
+      wordCount: 0,
+      tokenCount: 0
+    };
+  }
+}
+
+function countWords(text) {
+  if (!text) return 0;
+  return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+}
+
+function estimateTokens(text) {
+  if (!text) return 0;
+  // Rough estimation: ~4 characters per token
+  return Math.ceil(text.length / 4);
+}
 
 // AI Chat endpoint with Server-Sent Events
 app.post('/api/chat', async (req, res) => {
