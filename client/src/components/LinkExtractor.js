@@ -648,7 +648,7 @@ const LinkExtractor = ({
                   ) : (
                     Object.entries(prompts).map(([name, content]) => (
                       <div key={name} className="p-2 bg-gray-800 rounded border border-gray-700">
-                        <div className="font-mono text-sm text-blue-300">/{name}</div>
+                        <div className="font-mono text-sm text-blue-300">//{name}</div>
                         <div className="text-xs text-gray-400 mt-1 truncate">
                           {content.substring(0, 80)}{content.length > 80 ? '...' : ''}
                         </div>

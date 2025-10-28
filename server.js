@@ -19,31 +19,6 @@ app.use('/storage', express.static(path.join(__dirname, 'storage')));
 
 // Data directory setup
 const DATA_DIR = process.env.DATA_DIR || './data';
-fs.ensureDirSync(DATA_DIR);
-
-// Initialize data files
-const initializeDataFiles = async () => {
-  const files = {
-    prompts: path.join(DATA_DIR, 'prompts.json'),
-    substitutes: path.join(DATA_DIR, 'substitutes.json'),
-    settings: path.join(DATA_DIR, 'settings.json')
-  };
-
-  for (const [key, filePath] of Object.entries(files)) {
-    if (!await fs.pathExists(filePath)) {
-      let defaultData = {};
-      if (key === 'settings') {
-        defaultData = {
-          aiModel: 'claude-opus-4',
-          systemInstructions: 'You are a helpful AI assistant.',
-          rootFolderPath: process.env.ROOT_FOLDER_PATH || './'
-        };
-      }
-      await fs.writeJson(filePath, defaultData, { spaces: 2 });
-      console.log(`Initialized ${filePath} with default data`);
-    }
-  }
-};
 
 // Utility functions for data management
 const readJsonFile = async (filename) => {
@@ -148,12 +123,88 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
+// Get available prompt sheets
+app.get('/api/prompt-sheets', async (req, res) => {
+  try {
+    const promptSheets = await getAvailablePromptSheets();
+    res.json(promptSheets);
+  } catch (error) {
+    console.error('Error fetching prompt sheets:', error);
+    res.status(500).json({ error: 'Failed to fetch prompt sheets' });
+  }
+});
+
+// Get specific prompt sheet
+app.get('/api/prompt-sheets/:sheetName', async (req, res) => {
+  try {
+    const { sheetName } = req.params;
+    const sheetData = await getPromptSheet(sheetName);
+    if (sheetData) {
+      res.json(sheetData);
+    } else {
+      res.status(404).json({ error: 'Prompt sheet not found' });
+    }
+  } catch (error) {
+    console.error('Error fetching prompt sheet:', error);
+    res.status(500).json({ error: 'Failed to fetch prompt sheet' });
+  }
+});
+
+// Create new prompt sheet
+app.post('/api/prompt-sheets', async (req, res) => {
+  try {
+    const { name, description, prompts } = req.body;
+    const result = await createPromptSheet(name, description, prompts || {});
+    if (result.success) {
+      res.json({ message: 'Prompt sheet created successfully', name });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (error) {
+    console.error('Error creating prompt sheet:', error);
+    res.status(500).json({ error: 'Failed to create prompt sheet' });
+  }
+});
+
+// Delete prompt sheet
+app.delete('/api/prompt-sheets/:sheetName', async (req, res) => {
+  try {
+    const { sheetName } = req.params;
+    const result = await deletePromptSheet(sheetName);
+    if (result.success) {
+      res.json({ message: 'Prompt sheet deleted successfully' });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (error) {
+    console.error('Error deleting prompt sheet:', error);
+    res.status(500).json({ error: 'Failed to delete prompt sheet' });
+  }
+});
+
+// Save prompts to specific sheet
+app.post('/api/prompt-sheets/:sheetName/prompts', async (req, res) => {
+  try {
+    const { sheetName } = req.params;
+    const prompts = req.body;
+    const result = await savePromptsToSheet(sheetName, prompts);
+    if (result.success) {
+      res.json({ message: 'Prompts saved successfully' });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (error) {
+    console.error('Error saving prompts to sheet:', error);
+    res.status(500).json({ error: 'Failed to save prompts to sheet' });
+  }
+});
+
 // Validate link endpoint for link analysis
 app.post('/api/validate-link', async (req, res) => {
   try {
     const { linkData, rootPath } = req.body;
     const settings = await readJsonFile('settings.json');
-    const actualRootPath = rootPath || settings.rootFolderPath || './';
+    const actualRootPath = rootPath || settings.rootFolderPath || './storage';
     
     const result = await validateLinkData(linkData, actualRootPath);
     res.json(result);
@@ -173,7 +224,7 @@ app.post('/api/read-file', async (req, res) => {
   try {
     const { filePath } = req.body;
     const settings = await readJsonFile('settings.json');
-    const rootPath = settings.rootFolderPath || './';
+    const rootPath = settings.rootFolderPath || './storage';
     
     // Parse the link content to separate path and heading selector
     const parsed = parseLinkContent(filePath);
@@ -256,11 +307,11 @@ async function resolveWildcardLink(parsed, rootPath) {
   for (const filePath of matchingFiles) {
     try {
       const fileContent = await readAndProcessFile(filePath, parsed.headingSelector);
-      const fileName = path.basename(filePath);
-      results.push(`\n--- ${fileName} ---\n${fileContent}`);
+      const relativePath = path.relative(rootPath, filePath);
+      results.push(`\n=== FILE: ${relativePath} ===\n${fileContent}\n=== END FILE: ${relativePath} ===`);
     } catch (error) {
-      const fileName = path.basename(filePath);
-      results.push(`\n--- ${fileName} ---\n[Error: ${error.message}]`);
+      const relativePath = path.relative(rootPath, filePath);
+      results.push(`\n=== FILE: ${relativePath} ===\n[Error: ${error.message}]\n=== END FILE: ${relativePath} ===`);
     }
   }
 
@@ -287,8 +338,12 @@ async function resolveSingleFileLink(parsed, rootPath) {
     throw new Error(`File not found: ${parsed.filePath}`);
   }
 
-  // Process the file
-  return await readAndProcessFile(filePath, parsed.headingSelector);
+  // Process the file with labels
+  const fileContent = await readAndProcessFile(filePath, parsed.headingSelector);
+  const relativePath = path.relative(rootPath, filePath);
+  
+  // Add file labels (header and footer)
+  return `=== FILE: ${relativePath} ===\n${fileContent}\n=== END FILE: ${relativePath} ===`;
 }
 
 function findMatchingFiles(globPattern) {
@@ -765,6 +820,243 @@ function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
+// Helper functions for prompt sheets
+async function getAvailablePromptSheets() {
+  try {
+    const files = await fs.readdir(DATA_DIR);
+    const promptSheets = [];
+    
+    for (const file of files) {
+      // Look for files that match the pattern: prompts-[name].json
+      const match = file.match(/^prompts-(.+)\.json$/);
+      if (match) {
+        const sheetName = match[1];
+        const filePath = path.join(DATA_DIR, file);
+        
+        try {
+          const sheetData = await fs.readJson(filePath);
+          const promptCount = Object.keys(sheetData.prompts || sheetData || {}).length;
+          
+          promptSheets.push({
+            name: sheetName,
+            filename: file,
+            promptCount,
+            description: sheetData.description || null
+          });
+        } catch (error) {
+          console.warn(`Error reading prompt sheet ${file}:`, error.message);
+        }
+      }
+    }
+    
+    return promptSheets.sort((a, b) => a.name.localeCompare(b.name));
+  } catch (error) {
+    console.error('Error scanning for prompt sheets:', error);
+    return [];
+  }
+}
+
+async function getPromptSheet(sheetName) {
+  try {
+    const filename = `prompts-${sheetName}.json`;
+    const filePath = path.join(DATA_DIR, filename);
+    
+    if (!await fs.pathExists(filePath)) {
+      return null;
+    }
+    
+    const sheetData = await fs.readJson(filePath);
+    
+    // Handle different formats:
+    // 1. { "prompts": { ... }, "description": "..." }
+    // 2. { "prompt1": "content1", "prompt2": "content2" }
+    if (sheetData.prompts) {
+      // Format 1: structured with metadata
+      return {
+        name: sheetName,
+        prompts: sheetData.prompts,
+        description: sheetData.description || null
+      };
+    } else {
+      // Format 2: flat prompt object
+      return {
+        name: sheetName,
+        prompts: sheetData,
+        description: null
+      };
+    }
+  } catch (error) {
+    console.error(`Error reading prompt sheet ${sheetName}:`, error);
+    return null;
+  }
+}
+
+async function createPromptSheet(name, description, prompts) {
+  try {
+    // Validate sheet name
+    if (!name || typeof name !== 'string') {
+      return { success: false, error: 'Sheet name is required' };
+    }
+    
+    // Sanitize name (remove special characters, spaces)
+    const sanitizedName = name.toLowerCase().replace(/[^a-z0-9-_]/g, '-');
+    if (sanitizedName !== name.toLowerCase()) {
+      return { success: false, error: 'Sheet name can only contain letters, numbers, hyphens, and underscores' };
+    }
+    
+    const filename = `prompts-${sanitizedName}.json`;
+    const filePath = path.join(DATA_DIR, filename);
+    
+    // Check if sheet already exists
+    if (await fs.pathExists(filePath)) {
+      return { success: false, error: 'Prompt sheet already exists' };
+    }
+    
+    // Create sheet data
+    const sheetData = {
+      description: description || null,
+      prompts: prompts || {}
+    };
+    
+    await fs.writeJson(filePath, sheetData, { spaces: 2 });
+    console.log(`Created prompt sheet: ${filename}`);
+    
+    return { success: true };
+  } catch (error) {
+    console.error(`Error creating prompt sheet ${name}:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function deletePromptSheet(sheetName) {
+  try {
+    const filename = `prompts-${sheetName}.json`;
+    const filePath = path.join(DATA_DIR, filename);
+    
+    // Check if sheet exists
+    if (!await fs.pathExists(filePath)) {
+      return { success: false, error: 'Prompt sheet not found' };
+    }
+    
+    await fs.remove(filePath);
+    console.log(`Deleted prompt sheet: ${filename}`);
+    
+    return { success: true };
+  } catch (error) {
+    console.error(`Error deleting prompt sheet ${sheetName}:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function savePromptsToSheet(sheetName, prompts) {
+  try {
+    const filename = `prompts-${sheetName}.json`;
+    const filePath = path.join(DATA_DIR, filename);
+    
+    // Check if sheet exists
+    if (!await fs.pathExists(filePath)) {
+      return { success: false, error: 'Prompt sheet not found' };
+    }
+    
+    // Read existing sheet data to preserve description
+    const existingData = await fs.readJson(filePath);
+    const sheetData = {
+      description: existingData.description || null,
+      prompts: prompts
+    };
+    
+    await fs.writeJson(filePath, sheetData, { spaces: 2 });
+    console.log(`Updated prompts in sheet: ${filename}`);
+    
+    return { success: true };
+  } catch (error) {
+    console.error(`Error saving prompts to sheet ${sheetName}:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+// File operations endpoints for diff reviewer
+app.get('/api/files', async (req, res) => {
+  try {
+    const settings = await readJsonFile('settings.json');
+    const rootPath = settings.rootFolderPath || './storage';
+    
+    // Find all markdown and text files in the root directory
+    const globPattern = path.join(rootPath, '**/*.{md,txt}');
+    const files = await new Promise((resolve, reject) => {
+      glob(globPattern, { nodir: true }, (err, matches) => {
+        if (err) reject(err);
+        else resolve(matches);
+      });
+    });
+    
+    // Return relative paths from root
+    const relativeFiles = files.map(file => path.relative(rootPath, file));
+    res.json(relativeFiles);
+  } catch (error) {
+    console.error('Error listing files:', error);
+    res.status(500).json({ error: 'Failed to list files' });
+  }
+});
+
+app.get('/api/files/:filename(*)', async (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const settings = await readJsonFile('settings.json');
+    const rootPath = settings.rootFolderPath || './storage';
+    
+    const filePath = path.resolve(rootPath, filename);
+    
+    // Security check
+    const normalizedRoot = path.resolve(rootPath);
+    const normalizedFile = path.resolve(filePath);
+    if (!normalizedFile.startsWith(normalizedRoot)) {
+      return res.status(403).json({ error: 'File path outside root directory' });
+    }
+    
+    // Check if file exists
+    if (!await fs.pathExists(filePath)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    const content = await fs.readFile(filePath, 'utf8');
+    res.type('text/plain').send(content);
+  } catch (error) {
+    console.error('Error reading file:', error);
+    res.status(500).json({ error: 'Failed to read file' });
+  }
+});
+
+app.put('/api/files/:filename(*)', async (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const content = req.body;
+    const settings = await readJsonFile('settings.json');
+    const rootPath = settings.rootFolderPath || './storage';
+    
+    const filePath = path.resolve(rootPath, filename);
+    
+    // Security check
+    const normalizedRoot = path.resolve(rootPath);
+    const normalizedFile = path.resolve(filePath);
+    if (!normalizedFile.startsWith(normalizedRoot)) {
+      return res.status(403).json({ error: 'File path outside root directory' });
+    }
+    
+    // Ensure directory exists
+    await fs.ensureDir(path.dirname(filePath));
+    
+    // Write file content
+    await fs.writeFile(filePath, content, 'utf8');
+    
+    console.log(`File updated: ${filename}`);
+    res.json({ message: 'File saved successfully' });
+  } catch (error) {
+    console.error('Error writing file:', error);
+    res.status(500).json({ error: 'Failed to write file' });
+  }
+});
+
 // AI Chat endpoint with Server-Sent Events
 app.post('/api/chat', async (req, res) => {
   try {
@@ -895,7 +1187,12 @@ app.get('*', (req, res) => {
 
 // Start server
 const startServer = async () => {
-  await initializeDataFiles();
+  // Log available prompt sheets on startup
+  const promptSheets = await getAvailablePromptSheets();
+  if (promptSheets.length > 0) {
+    console.log(`Found ${promptSheets.length} prompt sheet(s):`, promptSheets.map(s => s.name).join(', '));
+  }
+  
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Data directory: ${DATA_DIR}`);

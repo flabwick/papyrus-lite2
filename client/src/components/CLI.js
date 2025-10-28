@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-const CLI = ({ onCommand, history, getSuggestions }) => {
+const CLI = ({ onCommand, history, getSuggestions, currentPromptSheet }) => {
   const [input, setInput] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
@@ -208,6 +208,11 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
             {new Date().toLocaleTimeString()}
           </span>
           <div className="flex-1 flex items-start">
+            {currentPromptSheet ? (
+              <span className="text-blue-400 mt-1 mr-1 text-sm font-mono">[{currentPromptSheet}]</span>
+            ) : (
+              <span className="text-red-400 mt-1 mr-1 text-sm font-mono">[no sheet]</span>
+            )}
             <span className="text-terminal-prompt mt-1">$ </span>
             <textarea
               ref={inputRef}
@@ -248,8 +253,8 @@ const CLI = ({ onCommand, history, getSuggestions }) => {
 
       {/* Help Footer */}
       <div className="bg-gray-800 text-gray-400 px-4 py-2 border-t border-gray-600 text-xs">
-        Commands: /restart /prompts /subs /system /ai-model /root | 
-        Type prompt names with / or raw text without / | 
+        Commands: /restart /prompts /subs /system /ai-model /root /prompt-sheet /create-sheet /delete-sheet | 
+        Type prompt names with // or raw text without / | 
         ↑↓ arrows for command history
       </div>
     </div>

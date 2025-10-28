@@ -12,13 +12,14 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editContent, setEditContent] = useState(promptContent);
+  const [currentContent, setCurrentContent] = useState(promptContent);
 
   const renderContent = async () => {
     setIsLoading(true);
     setError('');
     
     try {
-      const rendered = await processSubstitutions(promptContent, substitutes, settings);
+      const rendered = await processSubstitutions(currentContent, substitutes, settings);
       setRenderedContent(rendered);
       setIsRendered(true);
     } catch (err) {
@@ -98,14 +99,14 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
   };
 
   const handleCopy = () => {
-    const contentToCopy = isRendered ? renderedContent : promptContent;
+    const contentToCopy = isRendered ? renderedContent : currentContent;
     navigator.clipboard.writeText(contentToCopy).then(() => {
       // Could add a toast notification here
     });
   };
 
   const handleSendToAI = () => {
-    const contentToSend = isRendered ? renderedContent : promptContent;
+    const contentToSend = isRendered ? renderedContent : currentContent;
     onOpenChat(contentToSend);
   };
 
@@ -121,7 +122,7 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
     }
 
     try {
-      const contentToExport = isRendered ? renderedContent : promptContent;
+      const contentToExport = isRendered ? renderedContent : currentContent;
       const blob = new Blob([contentToExport], { type: 'text/markdown' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -154,8 +155,11 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
       if (success) {
         setShowEditDialog(false);
         setError('');
-        // Update the local content to reflect the changes
-        // Note: The parent component should handle updating the actual prompt content
+        // Update the local content to reflect the changes immediately
+        setCurrentContent(editContent);
+        // Clear rendered content so it will re-render with new content if user clicks render
+        setIsRendered(false);
+        setRenderedContent('');
       } else {
         setError('Failed to save prompt changes');
       }
@@ -214,7 +218,7 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
         {promptName !== 'Raw Input' && (
           <button
             onClick={() => {
-              setEditContent(promptContent);
+              setEditContent(currentContent);
               setShowEditDialog(true);
             }}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded transition-colors"
@@ -259,7 +263,7 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
       {showEditDialog && (
         <div className="mb-4 p-4 bg-gray-800 border border-gray-600 rounded">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-lg font-semibold">Edit Prompt: /{promptName}</h3>
+            <h3 className="text-lg font-semibold">Edit Prompt: //{promptName}</h3>
             {onOpenPromptsManager && (
               <button
                 onClick={() => {
@@ -276,7 +280,7 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
             placeholder="Enter prompt content... Use {{link-name}} for substitutions"
-            className="w-full h-40 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm resize-none mb-3"
+            className="w-full h-96 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm resize-none mb-3"
           />
           <div className="text-sm text-gray-400 mb-3">
             Use {`{{link-name}}`} for substitutions. Links can be file paths or substitute names.
@@ -291,7 +295,7 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
             <button
               onClick={() => {
                 setShowEditDialog(false);
-                setEditContent(promptContent);
+                setEditContent(currentContent);
                 setError('');
               }}
               className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
@@ -310,14 +314,14 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
           </div>
         ) : (
           <pre className="whitespace-pre-wrap font-mono text-sm text-gray-300">
-            {promptContent}
+            {currentContent}
           </pre>
         )}
       </div>
 
       {/* Link Analysis */}
       <LinkExtractor
-        promptContent={promptContent}
+        promptContent={currentContent}
         substitutes={substitutes}
         settings={settings}
         prompts={prompts}

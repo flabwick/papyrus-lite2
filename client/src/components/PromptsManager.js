@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import config from '../config';
 
-const PromptsManager = ({ prompts, onSave, onClose, reservedCommands }) => {
+const PromptsManager = ({ prompts, onSave, onClose, reservedCommands, currentPromptSheet }) => {
   const [localPrompts, setLocalPrompts] = useState({ ...prompts });
   const [newPromptName, setNewPromptName] = useState('');
   const [editingPrompt, setEditingPrompt] = useState(null);
   const [error, setError] = useState('');
+  const [availableSheets, setAvailableSheets] = useState([]);
+  const [selectedSheet, setSelectedSheet] = useState(currentPromptSheet || null);
+  const [loading, setLoading] = useState(false);
 
   const handleAddPrompt = () => {
     const trimmedName = newPromptName.trim();
@@ -49,7 +53,53 @@ const PromptsManager = ({ prompts, onSave, onClose, reservedCommands }) => {
     });
   };
 
+  useEffect(() => {
+    loadAvailableSheets();
+  }, []);
+
+  useEffect(() => {
+    if (selectedSheet !== currentPromptSheet) {
+      loadSheetPrompts(selectedSheet);
+    }
+  }, [selectedSheet]);
+
+  const loadAvailableSheets = async () => {
+    try {
+      const response = await fetch(`${config.apiUrl}/api/prompt-sheets`);
+      if (response.ok) {
+        const sheets = await response.json();
+        setAvailableSheets(sheets);
+      }
+    } catch (error) {
+      console.error('Error loading sheets:', error);
+    }
+  };
+
+  const loadSheetPrompts = async (sheetName) => {
+    if (!sheetName) {
+      // Load default prompts
+      setLocalPrompts({ ...prompts });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${config.apiUrl}/api/prompt-sheets/${sheetName}`);
+      if (response.ok) {
+        const sheetData = await response.json();
+        setLocalPrompts({ ...sheetData.prompts });
+      } else {
+        setError(`Failed to load sheet: ${sheetName}`);
+      }
+    } catch (error) {
+      setError(`Error loading sheet: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSave = async () => {
+    // Always use the parent's onSave function which now handles both default and sheet saves
     const success = await onSave(localPrompts);
     if (success) {
       onClose();
@@ -60,11 +110,49 @@ const PromptsManager = ({ prompts, onSave, onClose, reservedCommands }) => {
 
   return (
     <div className="p-6">
-      <h2 className="text-xl font-bold mb-4">Manage Prompts</h2>
+      <h2 className="text-xl font-bold mb-4">
+        Manage Prompts
+        {selectedSheet && (
+          <span className="text-blue-400 font-mono ml-2">[{selectedSheet}]</span>
+        )}
+      </h2>
       
       {error && (
         <div className="bg-red-900 border border-red-700 text-red-200 px-4 py-2 rounded mb-4">
           {error}
+        </div>
+      )}
+
+      {/* Sheet Selection */}
+      <div className="mb-6 p-4 bg-gray-800 rounded">
+        <h3 className="text-lg font-semibold mb-2">Prompt Sheet</h3>
+        <div className="flex space-x-2">
+          <select
+            value={selectedSheet || ''}
+            onChange={(e) => setSelectedSheet(e.target.value || null)}
+            className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
+            disabled={loading}
+          >
+            <option value="">Default Prompts (prompts.json)</option>
+            {availableSheets.map(sheet => (
+              <option key={sheet.name} value={sheet.name}>
+                {sheet.name} ({sheet.promptCount} prompts)
+                {sheet.description && ` - ${sheet.description}`}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="text-sm text-gray-400 mt-2">
+          {selectedSheet 
+            ? `Editing prompts in sheet: ${selectedSheet}` 
+            : 'Editing default prompts file'
+          }
+        </p>
+      </div>
+
+      {loading && (
+        <div className="text-center py-8">
+          <div className="text-gray-400">Loading prompts...</div>
         </div>
       )}
 
@@ -93,7 +181,8 @@ const PromptsManager = ({ prompts, onSave, onClose, reservedCommands }) => {
       </div>
 
       {/* Prompts List */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {!loading && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Prompt Names */}
         <div>
           <h3 className="text-lg font-semibold mb-2">Prompts ({Object.keys(localPrompts).length})</h3>
@@ -109,7 +198,7 @@ const PromptsManager = ({ prompts, onSave, onClose, reservedCommands }) => {
                 onClick={() => setEditingPrompt(name)}
               >
                 <div className="flex justify-between items-center">
-                  <span className="font-mono">/{name}</span>
+                  <span className="font-mono">//{name}</span>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -136,7 +225,7 @@ const PromptsManager = ({ prompts, onSave, onClose, reservedCommands }) => {
         {/* Prompt Editor */}
         <div>
           <h3 className="text-lg font-semibold mb-2">
-            {editingPrompt ? `Edit: /${editingPrompt}` : 'Select a prompt to edit'}
+            {editingPrompt ? `Edit: //${editingPrompt}` : 'Select a prompt to edit'}
           </h3>
           {editingPrompt && (
             <div>
@@ -152,7 +241,8 @@ const PromptsManager = ({ prompts, onSave, onClose, reservedCommands }) => {
             </div>
           )}
         </div>
-      </div>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex justify-end space-x-2 mt-6 pt-4 border-t border-gray-700">

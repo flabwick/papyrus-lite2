@@ -8,6 +8,10 @@ import AIModelSettings from './components/AIModelSettings';
 import RootFolderSettings from './components/RootFolderSettings';
 import PromptPreview from './components/PromptPreview';
 import AIChat from './components/AIChat';
+import PromptSheetSelector from './components/PromptSheetSelector';
+import PromptSheetCreator from './components/PromptSheetCreator';
+import PromptSheetDeleter from './components/PromptSheetDeleter';
+import DiffReviewer from './components/DiffReviewer';
 import config from './config';
 
 function App() {
@@ -18,10 +22,12 @@ function App() {
   const [currentPrompt, setCurrentPrompt] = useState(null);
   const [currentView, setCurrentView] = useState('cli');
   const [chatMessages, setChatMessages] = useState([]);
+  const [currentPromptSheet, setCurrentPromptSheet] = useState(null);
   const [settings, setSettings] = useState({
     aiModel: 'claude-3-5-sonnet-20241022',
     systemInstructions: 'You are a helpful AI assistant.',
-    rootFolderPath: './'
+    rootFolderPath: './',
+    'prompt-sheet': null
   });
 
   // Load initial data
@@ -69,19 +75,62 @@ function App() {
       if (settingsRes.ok) {
         const settingsData = await settingsRes.json();
         setSettings(settingsData);
+        
+        // Load the saved prompt sheet if it exists
+        if (settingsData['prompt-sheet']) {
+          loadPromptSheet(settingsData['prompt-sheet']);
+        }
       }
     } catch (error) {
       console.error('Error loading data:', error);
     }
   };
 
+  const loadPromptSheet = async (sheetName) => {
+    if (!sheetName) {
+      // Load default prompts
+      loadData();
+      setCurrentPromptSheet(null);
+      // Save the selection to settings
+      await savePromptSheetToSettings(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiUrl}/api/prompt-sheets/${sheetName}`);
+      if (response.ok) {
+        const sheetData = await response.json();
+        setPrompts(sheetData.prompts || {});
+        setCurrentPromptSheet(sheetName);
+        // Save the selection to settings
+        await savePromptSheetToSettings(sheetName);
+      } else {
+        console.error('Failed to load prompt sheet:', sheetName);
+      }
+    } catch (error) {
+      console.error('Error loading prompt sheet:', error);
+    }
+  };
+
   const savePrompts = async (newPrompts) => {
     try {
-      const response = await fetch(`${config.apiUrl}/api/prompts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newPrompts)
-      });
+      let response;
+      if (currentPromptSheet) {
+        // Save to specific prompt sheet
+        response = await fetch(`${config.apiUrl}/api/prompt-sheets/${currentPromptSheet}/prompts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPrompts)
+        });
+      } else {
+        // Save to default prompts.json
+        response = await fetch(`${config.apiUrl}/api/prompts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPrompts)
+        });
+      }
+      
       if (response.ok) {
         setPrompts(newPrompts);
         return true;
@@ -106,7 +155,8 @@ function App() {
         prompts={prompts}
         onSave={savePrompts}
         onClose={() => setModalContent(null)}
-        reservedCommands={['restart', 'prompts', 'subs', 'system', 'ai-model', 'root']}
+        reservedCommands={['restart', 'prompts', 'subs', 'system', 'ai-model', 'root', 'prompt-sheet', 'create-sheet', 'delete-sheet', 'diff']}
+        currentPromptSheet={currentPromptSheet}
       />
     );
   };
@@ -155,11 +205,19 @@ function App() {
     return false;
   };
 
+  const savePromptSheetToSettings = async (sheetName) => {
+    const updatedSettings = {
+      ...settings,
+      'prompt-sheet': sheetName
+    };
+    return await saveSettings(updatedSettings);
+  };
+
   const handleCommand = (command) => {
     const newHistory = [...history, { type: 'command', content: command, timestamp: Date.now() }];
     setHistory(newHistory);
 
-    // Handle different commands
+    // Handle system commands with single slash
     if (command === '/restart') {
       setHistory([]);
       setCurrentView('cli');
@@ -217,9 +275,56 @@ function App() {
       return;
     }
 
-    // Check if it's a prompt name
-    if (command.startsWith('/') && prompts[command.substring(1)]) {
-      const promptName = command.substring(1);
+    if (command === '/prompt-sheet') {
+      setModalContent(
+        <PromptSheetSelector
+          currentSheet={currentPromptSheet}
+          onSelectSheet={loadPromptSheet}
+          onClose={() => setModalContent(null)}
+        />
+      );
+      return;
+    }
+
+    if (command === '/create-sheet') {
+      setModalContent(
+        <PromptSheetCreator
+          onClose={() => setModalContent(null)}
+          onSuccess={(sheetName) => {
+            loadPromptSheet(sheetName);
+          }}
+        />
+      );
+      return;
+    }
+
+    if (command === '/delete-sheet') {
+      setModalContent(
+        <PromptSheetDeleter
+          onClose={() => setModalContent(null)}
+          onSuccess={(deletedSheet) => {
+            // If we deleted the current sheet, switch to default
+            if (deletedSheet === currentPromptSheet) {
+              loadPromptSheet(null);
+            }
+          }}
+        />
+      );
+      return;
+    }
+
+    if (command === '/diff') {
+      setModalContent(
+        <DiffReviewer
+          onClose={() => setModalContent(null)}
+        />
+      );
+      return;
+    }
+
+    // Check if it's a prompt name with double slash
+    if (command.startsWith('//') && prompts[command.substring(2)]) {
+      const promptName = command.substring(2);
       setCurrentPrompt(promptName);
       setModalContent(
         <PromptPreview
@@ -283,18 +388,30 @@ function App() {
   };
 
   const getSuggestions = (input) => {
-    const commands = ['restart', 'prompts', 'subs', 'system', 'ai-model', 'root'];
+    const commands = ['restart', 'prompts', 'subs', 'system', 'ai-model', 'root', 'prompt-sheet', 'create-sheet', 'delete-sheet', 'diff'];
     const promptNames = Object.keys(prompts);
-    const allSuggestions = [...commands, ...promptNames];
 
     if (!input.startsWith('/')) {
       return [];
     }
 
-    const searchTerm = input.substring(1).toLowerCase();
-    return allSuggestions
-      .filter(cmd => cmd.toLowerCase().includes(searchTerm))
-      .map(cmd => `/${cmd}`);
+    // Handle double slash for prompts
+    if (input.startsWith('//')) {
+      const searchTerm = input.substring(2).toLowerCase();
+      return promptNames
+        .filter(cmd => cmd.toLowerCase().includes(searchTerm))
+        .map(cmd => `//${cmd}`);
+    }
+
+    // Handle single slash for system commands
+    if (input.startsWith('/')) {
+      const searchTerm = input.substring(1).toLowerCase();
+      return commands
+        .filter(cmd => cmd.toLowerCase().includes(searchTerm))
+        .map(cmd => `/${cmd}`);
+    }
+
+    return [];
   };
 
   return (
@@ -303,6 +420,7 @@ function App() {
         onCommand={handleCommand}
         history={history}
         getSuggestions={getSuggestions}
+        currentPromptSheet={currentPromptSheet}
       />
       
       {modalContent && (
