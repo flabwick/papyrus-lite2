@@ -76,7 +76,10 @@ const PromptPreview = ({ promptName, promptContent, substitutes, settings, promp
       const response = await fetch(`${config.apiUrl}/api/read-file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: linkName })
+        body: JSON.stringify({ 
+          filePath: linkName,
+          rootPath: settings?.rootFolderPath || ''
+        })
       });
 
       if (!response.ok) {

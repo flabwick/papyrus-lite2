@@ -214,7 +214,7 @@ const LinkExtractor = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           linkData: parsedLink,
-          rootPath: settings?.rootFolder || ''
+          rootPath: settings?.rootFolderPath || ''
         })
       });
 
