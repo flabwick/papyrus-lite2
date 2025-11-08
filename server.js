@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs-extra');
-const glob = require('glob');
+const { glob } = require('glob');
 require('dotenv').config();
 
 const app = express();
@@ -27,6 +27,16 @@ const readJsonFile = async (filename) => {
     return await fs.readJson(filePath);
   } catch (error) {
     console.error(`Error reading ${filename}:`, error);
+    
+    // Return appropriate defaults for different files
+    if (filename === 'settings.json') {
+      return {
+        aiModel: 'claude-3-5-sonnet-20241022',
+        systemInstructions: 'You are a helpful AI assistant.',
+        rootFolderPath: process.env.ROOT_FOLDER_PATH || './storage',
+        'prompt-sheet': null
+      };
+    }
     return {};
   }
 };
@@ -40,6 +50,28 @@ const writeJsonFile = async (filename, data) => {
   } catch (error) {
     console.error(`Error writing ${filename}:`, error);
     return false;
+  }
+};
+
+// Initialize settings file with defaults if it doesn't exist
+const initializeSettings = async () => {
+  try {
+    const settingsPath = path.join(DATA_DIR, 'settings.json');
+    const exists = await fs.pathExists(settingsPath);
+    
+    if (!exists) {
+      const defaultSettings = {
+        aiModel: 'claude-3-5-sonnet-20241022',
+        systemInstructions: 'You are a helpful AI assistant.',
+        rootFolderPath: process.env.ROOT_FOLDER_PATH || './storage',
+        'prompt-sheet': null
+      };
+      
+      await writeJsonFile('settings.json', defaultSettings);
+      console.log('Initialized settings.json with default values');
+    }
+  } catch (error) {
+    console.error('Error initializing settings:', error);
   }
 };
 
@@ -203,8 +235,7 @@ app.post('/api/prompt-sheets/:sheetName/prompts', async (req, res) => {
 app.post('/api/validate-link', async (req, res) => {
   try {
     const { linkData, rootPath } = req.body;
-    const settings = await readJsonFile('settings.json');
-    const actualRootPath = rootPath || settings.rootFolderPath || './storage';
+    const actualRootPath = rootPath || process.env.ROOT_FOLDER_PATH || './storage';
     
     const result = await validateLinkData(linkData, actualRootPath);
     res.json(result);
@@ -223,8 +254,7 @@ app.post('/api/validate-link', async (req, res) => {
 app.post('/api/read-file', async (req, res) => {
   try {
     const { filePath } = req.body;
-    const settings = await readJsonFile('settings.json');
-    const rootPath = settings.rootFolderPath || './storage';
+    const rootPath = process.env.ROOT_FOLDER_PATH || './storage';
     
     // Parse the link content to separate path and heading selector
     const parsed = parseLinkContent(filePath);
@@ -346,21 +376,18 @@ async function resolveSingleFileLink(parsed, rootPath) {
   return `=== FILE: ${relativePath} ===\n${fileContent}\n=== END FILE: ${relativePath} ===`;
 }
 
-function findMatchingFiles(globPattern) {
-  return new Promise((resolve, reject) => {
-    glob(globPattern, { nodir: true }, (err, files) => {
-      if (err) {
-        reject(err);
-      } else {
-        // Filter for supported file types
-        const supportedFiles = files.filter(file => {
-          const ext = path.extname(file).toLowerCase();
-          return ['.md', '.txt'].includes(ext);
-        }).sort();
-        resolve(supportedFiles);
-      }
-    });
-  });
+async function findMatchingFiles(globPattern) {
+  try {
+    const files = await glob(globPattern, { nodir: true });
+    // Filter for supported file types
+    const supportedFiles = files.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return ['.md', '.txt'].includes(ext);
+    }).sort();
+    return supportedFiles;
+  } catch (err) {
+    throw err;
+  }
 }
 
 async function readAndProcessFile(filePath, headingSelector) {
@@ -978,17 +1005,11 @@ async function savePromptsToSheet(sheetName, prompts) {
 // File operations endpoints for diff reviewer
 app.get('/api/files', async (req, res) => {
   try {
-    const settings = await readJsonFile('settings.json');
-    const rootPath = settings.rootFolderPath || './storage';
+    const rootPath = process.env.ROOT_FOLDER_PATH || './storage';
     
     // Find all markdown and text files in the root directory
     const globPattern = path.join(rootPath, '**/*.{md,txt}');
-    const files = await new Promise((resolve, reject) => {
-      glob(globPattern, { nodir: true }, (err, matches) => {
-        if (err) reject(err);
-        else resolve(matches);
-      });
-    });
+    const files = await glob(globPattern, { nodir: true });
     
     // Return relative paths from root
     const relativeFiles = files.map(file => path.relative(rootPath, file));
@@ -999,11 +1020,10 @@ app.get('/api/files', async (req, res) => {
   }
 });
 
-app.get('/api/files/:filename(*)', async (req, res) => {
+app.get('/api/files/:filename', async (req, res) => {
   try {
     const filename = req.params.filename;
-    const settings = await readJsonFile('settings.json');
-    const rootPath = settings.rootFolderPath || './storage';
+    const rootPath = process.env.ROOT_FOLDER_PATH || './storage';
     
     const filePath = path.resolve(rootPath, filename);
     
@@ -1027,12 +1047,11 @@ app.get('/api/files/:filename(*)', async (req, res) => {
   }
 });
 
-app.put('/api/files/:filename(*)', async (req, res) => {
+app.put('/api/files/:filename', async (req, res) => {
   try {
     const filename = req.params.filename;
     const content = req.body;
-    const settings = await readJsonFile('settings.json');
-    const rootPath = settings.rootFolderPath || './storage';
+    const rootPath = process.env.ROOT_FOLDER_PATH || './storage';
     
     const filePath = path.resolve(rootPath, filename);
     
@@ -1187,6 +1206,9 @@ app.get('*', (req, res) => {
 
 // Start server
 const startServer = async () => {
+  // Initialize settings with defaults if needed
+  await initializeSettings();
+  
   // Log available prompt sheets on startup
   const promptSheets = await getAvailablePromptSheets();
   if (promptSheets.length > 0) {

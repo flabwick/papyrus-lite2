@@ -26,7 +26,7 @@ function App() {
   const [settings, setSettings] = useState({
     aiModel: 'claude-3-5-sonnet-20241022',
     systemInstructions: 'You are a helpful AI assistant.',
-    rootFolderPath: './',
+    rootFolderPath: './storage',
     'prompt-sheet': null
   });
 

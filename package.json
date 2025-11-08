@@ -19,7 +19,8 @@
     "fs-extra": "^11.1.1",
     "glob": "^11.0.3",
     "openai": "^5.20.3",
-    "path": "^0.12.7"
+    "path": "^0.12.7",
+    "unison": "^0.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
