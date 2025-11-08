@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname, 'client/build')));
 app.use('/storage', express.static(path.join(__dirname, 'storage')));
 
 // Data directory setup
-const DATA_DIR = process.env.DATA_DIR || './data';
+const DATA_DIR = process.env.SYSTEM_DATA_FOLDER || process.env.DATA_DIR || './data';
 
 // Utility functions for data management
 const readJsonFile = async (filename) => {
